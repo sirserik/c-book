@@ -1,0 +1,39 @@
+# Описание мира RPG-демо.
+# Формат: каждая локация начинается с `location <id>`. Дальше идут пары
+# `ключ <значение>`. Имена предметов с подчёркиванием — оно превратится в пробел.
+# Строки, начинающиеся с #, и пустые игнорируются.
+
+location glade
+name Лесная поляна
+desc Залитая солнцем поляна. На западе видна тропа к деревне, на востоке — тёмный лес. На юг ведёт горная тропка.
+exit west village
+exit east forest
+exit south mountain
+item weapon ржавый_меч 5 8
+
+location village
+name Деревня
+desc Маленькая деревня из десятка домов. Возле колодца сложены припасы.
+exit east glade
+item consumable зелье_лечения 1 15
+item consumable хлеб 1 5
+
+location forest
+name Тёмный лес
+desc Ветви скрипят над головой. Здесь сумрачно и тихо.
+exit west glade
+exit north cave
+item armor кожаный_нагрудник 8 4
+
+location cave
+name Пещера
+desc Сырая пещера. Где-то в глубине капает вода.
+exit south forest
+item weapon боевой_топор 7 12
+item armor стальной_щит 6 6
+
+location mountain
+name Горная тропка
+desc Узкая тропка вьётся вдоль обрыва. Виден весь лес.
+exit north glade
+item consumable вода 1 3

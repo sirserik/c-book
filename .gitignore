@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# Артефакты сборки демо-проектов (бинарники, объектники, зависимости)
+demo-*/build/
+*.o
+*.d
+
+# Runtime-данные, которые демо создают при запуске.
+# Исходные данные (demo-rpg/data/world.txt) — остаются под версионным контролем.
+demo-rpg/data/saves/
+demo-db/data/
+demo-chat/data/*.bin
