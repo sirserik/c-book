@@ -1,157 +1,98 @@
 # Глава 49. std::filesystem
 
-В наших проектах мы работали с файлами и папками **руками**:
-- В `demo-shell` (главы 26-31) — POSIX-вызовы `open`/`read`/`close`/`opendir`/`stat`.
-- В `demo-db` — `mkdir`, `pread`/`pwrite`/`fsync`.
-- В `demo-chat` — `open`/`read`/`write` для history.
+Всю книгу мы работали с файлами через системные вызовы. Открыть — `open`, узнать размер — `fstat`, создать каталог — `mkdir`, обойти его — `opendir` с `readdir`. Всё это POSIX, то есть Linux и macOS; на Windows пришлось бы писать другой код с другими именами.
 
-Всё это **POSIX**, на macOS/Linux работает. На **Windows** — другой API: `CreateFile`, `FindFirstFile`, путь с `\`, не `/`. Кросс-платформенный код приходится писать через `#ifdef _WIN32`.
+В C++17 появилась библиотека `<filesystem>`, которая делает то же самое переносимо. В этой главе разберём, что она умеет, чем `path` отличается от строки и почему у каждой функции есть две версии.
 
-C++17 добавил **`std::filesystem`** — стандартный кросс-платформенный API. В этой главе обзорно: `path`, операции, итерация по каталогам, разбор пути. Финальный демо собирает всё.
+## Путь — не строка
 
-## std::filesystem::path
+Первое, к чему надо привыкнуть: путь представлен отдельным типом `std::filesystem::path`, а не `std::string`.
 
-Главный класс — `fs::path`. Представляет путь, **не** проверяет существование.
+Причин несколько. Разделители различаются: на Windows это обратная косая черта, в остальном мире — прямая. Кодировка различается: на Windows имена файлов хранятся в UTF-16, в Linux это просто байты, на macOS — UTF-8 в особой нормализованной форме. И, наконец, у пути есть структура: каталог, имя, расширение, — которую по строке приходится вычислять руками.
+
+Тип `path` всё это прячет. Его можно строить из строки, из строкового литерала, из другого пути:
 
 ```cpp
-#include <filesystem>
 namespace fs = std::filesystem;
 
-fs::path p1 = "/Users/serik/docs/report.pdf";
-fs::path p2 = "data";
-fs::path p3 = p2 / "config" / "app.toml";   // оператор / для конкатенации
-// p3 = "data/config/app.toml"
+fs::path base = "/tmp/fs_demo";
+fs::path file = base / "a.txt";        // оператор / собирает путь
 ```
 
-Оператор `/` — кросс-платформенный, использует правильный разделитель: `/` на Unix, `\` на Windows. Никакого `if (windows) ...` руками.
+Оператор деления вместо склейки строк — самая заметная особенность. Он сам подставляет нужный разделитель и не даёт получить двойную косую черту:
 
-### Разбор пути
+```
+Состав: "data/config/app.toml"
+```
+
+Разбор пути на части — набор методов:
 
 ```cpp
 fs::path p = "/Users/alice/docs/report.pdf";
-
-p.parent_path();    // "/Users/alice/docs"
-p.filename();       // "report.pdf"
-p.stem();           // "report" (filename без extension)
-p.extension();      // ".pdf"
-p.root_path();      // "/"
-p.root_directory(); // "/"
+std::cout << "parent_path: " << p.parent_path() << "\n";
+std::cout << "filename:    " << p.filename() << "\n";
+std::cout << "stem:        " << p.stem() << "\n";
+std::cout << "extension:   " << p.extension() << "\n";
 ```
 
-Удобно для:
-- Найти родительский каталог.
-- Узнать тип файла по расширению.
-- Заменить расширение: `p.replace_extension(".bak")`.
-
-Тип `fs::path` имеет операторы сравнения, hash — можно класть в `std::unordered_map<fs::path, T>`.
-
-## Файловые операции
-
-```cpp
-fs::create_directory(path);        // создать одну папку
-fs::create_directories(path);      // и все промежуточные (как mkdir -p)
-fs::remove(path);                  // удалить файл или ПУСТУЮ папку
-fs::remove_all(path);              // удалить папку со всем содержимым (rm -rf!)
-fs::copy_file(from, to);
-fs::rename(from, to);              // также для перемещения
-
-fs::exists(path);
-fs::is_regular_file(path);
-fs::is_directory(path);
-fs::is_symlink(path);
-fs::is_empty(path);
-
-fs::file_size(path);               // в байтах
-fs::last_write_time(path);         // время модификации
+```
+parent_path: "/Users/alice/docs"
+filename:    "report.pdf"
+stem:        "report"
+extension:   ".pdf"
 ```
 
-Никаких POSIX-вызовов, без `#ifdef`. Работает одинаково на Linux/macOS/Windows.
+Раньше это писали руками через `rfind('/')` и `rfind('.')`, каждый раз заново и каждый раз с ошибками на краевых случаях: путь без каталога, файл без расширения, имя вроде `.gitignore` (у него расширения нет, это имя целиком).
 
-### Текущая папка
+Обратите внимание, что вывод пути в поток даёт кавычки. Так сделано намеренно: в именах файлов бывают пробелы, и кавычки показывают границы. Если нужна чистая строка — есть метод `string()`.
+
+## Операции с файлами и каталогами
 
 ```cpp
-fs::path cwd = fs::current_path();
-fs::current_path("/tmp");   // изменить cwd
+fs::create_directories(base / "subdir1" / "deeper");
 ```
 
-Эквивалент `getcwd` / `chdir` в POSIX.
-
-### Symlinks и absolute paths
+Создаёт всю цепочку сразу — как `mkdir -p`. Есть и `create_directory`, создающий один уровень и требующий существования родителя.
 
 ```cpp
-fs::path abs = fs::absolute(p);             // относительный → абсолютный
-fs::path canonical = fs::canonical(p);     // абсолютный без `..` и симлинков
-fs::create_symlink("/tmp", "/home/link");
+fs::remove(file);           // удалить файл или пустой каталог
+fs::remove_all(base);       // удалить рекурсивно, как rm -rf
+fs::copy(from, to);
+fs::rename(from, to);
 ```
 
-## Итерация по каталогу
+Всё это раньше требовало либо системных вызовов, либо запуска внешних программ. Обратите особое внимание на `remove_all` — он опасен ровно настолько, насколько опасен `rm -rf`, и ошибка в вычислении пути обойдётся дорого.
 
-Два класса:
-
-**`fs::directory_iterator`** — один уровень (как `ls`):
+Свойства файла:
 
 ```cpp
-for (const auto& entry : fs::directory_iterator("/tmp")) {
-    std::cout << entry.path() << "\n";
-}
+std::cout << "exists: " << fs::exists(file) << "\n";
+std::cout << "is_regular_file: " << fs::is_regular_file(file) << "\n";
+std::cout << "file_size: " << fs::file_size(file) << "\n";
 ```
 
-**`fs::recursive_directory_iterator`** — все вложенные (как `find . -type f`):
+```
+exists: 1
+is_regular_file: 1
+file_size: 7
+```
+
+Здесь стоит сделать предупреждение, которое относится не к библиотеке, а к работе с файловой системой вообще. Проверка «файл существует» и последующее действие с ним — это две операции, между которыми мир может измениться. Файл могли удалить, подменить символической ссылкой, заменить чужим. В защищённом коде такую пару называют уязвимостью проверки-и-использования и избегают: вместо «проверить и открыть» просто открывают и разбирают ошибку.
+
+## Обход каталогов
+
+Раньше это выглядело как цикл с `opendir`, `readdir` и `closedir`, а рекурсия писалась руками. Теперь:
 
 ```cpp
-for (const auto& entry : fs::recursive_directory_iterator("/tmp")) {
+for (const auto& entry : fs::recursive_directory_iterator(base)) {
     if (entry.is_regular_file()) {
-        std::cout << entry.path()
-                  << " " << entry.file_size() << " bytes\n";
+        std::cout << entry.path().string()
+                  << "  (" << entry.file_size() << " bytes)\n";
+    } else if (entry.is_directory()) {
+        std::cout << entry.path().string() << "/\n";
     }
 }
 ```
-
-`entry` — это `fs::directory_entry`. Имеет `path()`, `is_regular_file()`, `is_directory()`, `file_size()`, и так далее. **Cached** — данные читаются один раз при обходе, не stat'ом на каждый запрос.
-
-Это **гигантское** упрощение vs POSIX. Чтобы пройти дерево с opendir/readdir вручную, нужно стек, рекурсию, обработку errno. С `recursive_directory_iterator` — 3 строки.
-
-## Демо
-
-`utils/filesystem_demo.cpp`:
-
-```cpp
-namespace fs = std::filesystem;
-
-int main() {
-    fs::path base = "/tmp/fs_demo";
-    fs::remove_all(base);
-    fs::create_directories(base / "subdir1" / "deeper");
-
-    std::ofstream(base / "a.txt") << "hello a";
-    std::ofstream(base / "subdir1" / "b.txt") << "hello b";
-    std::ofstream(base / "subdir1" / "deeper" / "c.txt") << "hello c";
-
-    for (const auto& entry : fs::recursive_directory_iterator(base)) {
-        if (entry.is_regular_file()) {
-            std::cout << entry.path().string()
-                      << "  (" << entry.file_size() << " bytes)\n";
-        }
-    }
-
-    fs::path file = base / "a.txt";
-    std::cout << "exists: " << fs::exists(file) << "\n";
-    std::cout << "size: " << fs::file_size(file) << "\n";
-
-    fs::copy_file(file, base / "a_copy.txt");
-    fs::rename(base / "a_copy.txt", base / "a_renamed.txt");
-
-    fs::path p = "/Users/alice/docs/report.pdf";
-    std::cout << p.parent_path() << "\n";   // /Users/alice/docs
-    std::cout << p.filename() << "\n";       // report.pdf
-    std::cout << p.stem() << "\n";           // report
-    std::cout << p.extension() << "\n";      // .pdf
-
-    fs::remove_all(base);
-}
-```
-
-Запуск:
 
 ```
 === Все файлы в "/tmp/fs_demo" ===
@@ -160,156 +101,104 @@ int main() {
 /tmp/fs_demo/subdir1/deeper/
 /tmp/fs_demo/subdir1/deeper/c.txt  (7 bytes)
 /tmp/fs_demo/subdir1/b.txt  (7 bytes)
-
-exists: 1
-is_regular_file: 1
-file_size: 7
-
-=== Разбор "/Users/alice/docs/report.pdf" ===
-parent_path: "/Users/alice/docs"
-filename:    "report.pdf"
-stem:        "report"
-extension:   ".pdf"
 ```
 
-50 строк кода — а покрывает «создать дерево, найти все файлы, разобрать пути». На POSIX это было бы 200 строк со стеками и errno.
+Есть два итератора: `directory_iterator` обходит один уровень, `recursive_directory_iterator` — всё дерево. Оба работают в цикле по диапазону.
 
-## Где в наших проектах
+Порядок обхода не определён — обратите внимание на вывод: `b.txt` идёт после содержимого `deeper`. Файловая система выдаёт записи в своём порядке, и если нужен отсортированный список, его надо собрать и отсортировать самому.
 
-В наших главах можно было заменить:
+Элемент обхода — не путь, а `directory_entry`, и это важно для производительности. Он кэширует сведения о файле, полученные при обходе, поэтому `entry.is_regular_file()` и `entry.file_size()` обычно не делают дополнительных обращений к диску, а вот `fs::file_size(entry.path())` сделал бы. На каталоге в сто тысяч файлов разница заметна.
 
-### demo-shell
-
-Команда `ls` — глава 31 (`utils/mycat.cpp`/`mywc.cpp`):
+У рекурсивного итератора есть полезная возможность — не заходить в текущий каталог:
 
 ```cpp
-// Старый, POSIX:
-DIR* dir = opendir(path);
-struct dirent* entry;
-while ((entry = readdir(dir)) != nullptr) {
-    // entry->d_name — имя файла
-    // нужен ещё stat() для типа
-}
-closedir(dir);
-
-// Новый, std::filesystem:
-for (const auto& e : fs::directory_iterator(path)) {
-    std::cout << e.path().filename().string() << "\n";
-}
-```
-
-5 строк вместо 10, плюс работает на Windows.
-
-### demo-db
-
-В `database.cpp`:
-
-```cpp
-::mkdir(dir.c_str(), 0755);   // POSIX
-fs::create_directories(dir);  // C++17, кросс-платформенно
-```
-
-`fs::create_directories` — что-то типа `mkdir -p`, создаёт все промежуточные. POSIX `mkdir` ругается, если родительского нет.
-
-### demo-chat
-
-В `history.h` — open файла. Стандартный `std::ofstream` справляется, но `fs::file_size(path)` для проверки лимита — удобно.
-
-### Обход проектной директории
-
-В RPG — для загрузки всех save-файлов из `data/saves/`:
-
-```cpp
-std::vector<std::string> list_saves() {
-    std::vector<std::string> result;
-    for (const auto& e : fs::directory_iterator("data/saves")) {
-        if (e.is_regular_file() && e.path().extension() == ".sav") {
-            result.push_back(e.path().stem().string());
-        }
+for (auto it = fs::recursive_directory_iterator(base);
+     it != fs::recursive_directory_iterator(); ++it) {
+    if (it->is_directory() && it->path().filename() == ".git") {
+        it.disable_recursion_pending();   // не заходить внутрь
     }
-    return result;
 }
 ```
 
-Раньше пришлось бы `opendir` + `readdir` + проверять расширение строки руками. Сейчас — 5 строк.
+Так пропускают служебные каталоги при обходе проекта.
 
-## Ошибки
+## Ошибки: две версии каждой функции
 
-По умолчанию операции **бросают** `fs::filesystem_error` при ошибке. Можно через `std::error_code` (без throw):
+У большинства функций библиотеки есть два варианта — с исключением и с кодом ошибки:
 
 ```cpp
+// Бросает fs::filesystem_error при неудаче.
+std::uintmax_t size = fs::file_size(p);
+
+// Не бросает: ошибка попадает в ec.
 std::error_code ec;
-fs::create_directory("/no/permission/here", ec);
+std::uintmax_t size = fs::file_size(p, ec);
 if (ec) {
-    std::cerr << "ошибка: " << ec.message() << "\n";
+    std::cerr << "не удалось: " << ec.message() << "\n";
 }
 ```
 
-Подходит когда «попытаться, и если не вышло — продолжить». Например, при создании папки с возможностью «уже существует».
+Выбор зависит от того, насколько ошибка ожидаема. Отсутствие файла, который должен быть, — исключительная ситуация, тут уместно исключение. Проверка сотни путей, из которых половина может не существовать, — обычный ход дела, и версия с кодом ошибки избавит от исключений в цикле.
 
-## Производительность
+Тип `std::error_code` появился ещё в C++11 и устроен любопытно: он хранит числовой код и указатель на категорию, которая умеет превращать код в сообщение. Благодаря этому один тип годится и для ошибок файловой системы, и для сетевых, и для ваших собственных.
 
-`std::filesystem` обычно **немного медленнее** ручного POSIX:
-- Каждая операция оборачивается C++-классом.
-- Path хранит строку (alloc).
-- Iterator кэширует stat — выгодно, если используете несколько раз; накладно, если нет.
+## Чего библиотека не делает
 
-Для большинства приложений разница неощутима. На очень частых файловых операциях (миллион stat'ов) — может быть заметно.
+Она не заменяет системные вызовы там, где нужен точный контроль. Нашему `PageManager` из главы 33 нужны `pread` и `pwrite` со смещением и `fsync` — ничего этого в `filesystem` нет и не будет: библиотека занимается путями и метаданными, а не содержимым файлов.
 
-## Windows nuances
+Она не даёт атомарности. Между `exists` и `remove` файл может измениться, и никакие обёртки этого не исправят.
 
-Кросс-платформа не идеальна. На Windows есть особенности:
+Она не решает вопросы прав доступа сложнее базовых. Владелец, группа, списки контроля доступа — всё это осталось за пределами стандарта, потому что модели прав в Unix и Windows слишком разные.
 
-- **Пути в UTF-16** (wchar_t). `fs::path` использует `wstring` на Windows, `string` на POSIX. Для печати в `cout` нужно конвертировать.
-- **Backslash** — Windows исторически. `fs::path` нормализует.
-- **Привилегии** — `create_directory` в `C:\Windows` потребует admin.
-- **Регистр имён** — Windows case-insensitive. `Foo.txt == foo.txt`.
+И у неё есть особенность, о которой стоит знать при сборке. В первых реализациях (GCC 8, Clang 7) библиотека требовала явного подключения: `-lstdc++fs` для GCC, `-lc++fs` для Clang. В современных версиях это не нужно, но если сборка падает на неопределённых ссылках при вполне правильном коде — причина, скорее всего, в этом.
 
-`fs::path::string()` возвращает narrow string. На Windows с не-ASCII именами может потеряться информация. Безопаснее `.u8string()` или `.wstring()`.
+## Как это выглядело бы в нашей книге
 
-## Fallback под C++11
+`Database::Database` из главы 37 создаёт каталог системным вызовом:
 
-Если у вас компилятор без C++17, есть несколько fallback:
+```cpp
+::mkdir(dir.c_str(), 0755);
+```
 
-1. **Boost.Filesystem** — почти то же API, работает на C++03+. `#include <boost/filesystem.hpp>`.
-2. **TS version** — `<experimental/filesystem>`. Работает на GCC 5.3+ / Clang 3.9+.
-3. **POSIX/WinAPI** вручную. Что мы и делали.
+Три проблемы: не создаёт промежуточные каталоги, не переносится на Windows, молча игнорирует ошибку. С библиотекой:
 
-На современных компиляторах **`<filesystem>`** уже доступен — без Boost.
+```cpp
+fs::create_directories(dir);
+```
+
+Проверка размера файла в `PageManager` делается через `fstat` — и это правильно, потому что дескриптор уже открыт. А вот проверка существования файла базы до открытия просилась бы на `fs::exists`.
+
+Утилита `mycat` из главы 31 могла бы принимать каталоги и обходить их рекурсивно — с итератором это десять строк.
 
 ## Главные правила главы
 
-1. **`fs::path` для путей** — кросс-платформенно, parser встроен.
-2. **Оператор `/`** для конкатенации, не строки.
-3. **`fs::create_directories`** делает «mkdir -p».
-4. **`fs::recursive_directory_iterator`** для обхода дерева — 3 строки.
-5. **`fs::remove_all` это `rm -rf`** — будьте осторожны!
-6. **error_code для non-throwing** API. Бросать по умолчанию.
-7. **Windows: backslash, wchar_t, регистр** — не идеальная переносимость.
-8. **Современный default** для нового кода.
+1. Путь — отдельный тип, а не строка: он знает про разделители, кодировку и структуру.
+2. Пути собирают оператором `/`, а не склейкой строк.
+3. Разбор на каталог, имя, основу и расширение делают методами `path`, а не поиском символов.
+4. `directory_iterator` обходит уровень, `recursive_directory_iterator` — дерево; порядок обхода не определён.
+5. Сведения из `directory_entry` уже прочитаны при обходе — пользуйтесь ими вместо повторных запросов.
+6. У функций две версии: с исключением и с `std::error_code`; выбирайте по ожидаемости ошибки.
+7. Проверка существования и последующее действие — не атомарная пара; в защищённом коде так не делают.
+8. Библиотека занимается путями и метаданными, но не содержимым файлов — для чтения и записи по-прежнему нужны потоки или системные вызовы.
 
-## Маленькое упражнение
+## Упражнения
 
-1. Соберите и запустите `./build/filesystem_demo`. Изучите вывод.
+1. Соберите и запустите `./build/filesystem_demo`. Затем добавьте в дерево файл с пробелом в имени и посмотрите, как он печатается.
 
-2. Перепишите `Database::Database` в demo-db: вместо `::mkdir(dir.c_str(), 0755)` используйте `fs::create_directories(dir)`.
+2. Напишите программу, которая считает суммарный размер каталога рекурсивно. Сравните результат с `du -sb` (Linux) или `du -sk` (macOS) и объясните расхождение, если оно есть.
 
-3. Напишите `ls`-utility через `fs::directory_iterator` за 10 строк.
+3. Сделайте обход, пропускающий каталоги `.git` и `node_modules`, через `disable_recursion_pending`. Проверьте на каталоге с проектом.
 
-4. Реализуйте `du` — рекурсивный обход и сумма `file_size`. На вашем home directory какая суммарная?
+4. Напишите функцию, которая находит все файлы с заданным расширением. Сравните две версии: с `entry.path().extension()` и с ручным поиском точки в строке.
 
-5. (Сложнее) Реализуйте функцию `list_saves()` (см. выше) в RPG. Добавьте команду `saves` в игровой цикл RPG для просмотра списка сохранений.
+5. Вызовите `fs::file_size` для несуществующего файла в обеих версиях — с исключением и с `error_code`. Напечатайте сообщение из `ec.message()`.
 
-6. (Сложнее) Замените open/read/write в `History` (demo-chat, глава 46) на `std::ifstream`/`std::ofstream` + `fs::file_size`.
+6. Замените `::mkdir` в `Database` на `fs::create_directories` и проверьте, что база создаётся во вложенном пути вроде `data/2026/july/db`.
 
-7. (Сложнее) Сделайте watch-mode: периодически проверять `last_write_time` файла, если изменился — перезагрузить.
+7. (Сложнее) Напишите утилиту-дубликатор: находит файлы одинакового размера, для них считает хеш содержимого и печатает группы совпадающих. Обратите внимание, где нужен `filesystem`, а где — обычное чтение файла.
 
-8. Прочитайте `fs::space(path)` — свободное место на диске. Когда полезно?
+8. (Сложнее) Реализуйте безопасное создание временного файла: без проверки существования, атомарно, с правами только для владельца. Разберитесь, почему `exists` плюс `create` — плохое решение и что предлагает вместо этого POSIX.
 
 ## Что дальше
 
-Глава 50 — **`std::string_view`, parallel algorithms**. Лёгкая обёртка для строк без копий, и `std::execution::par` для параллельных алгоритмов C++17.
-
-Глава 51 — финал: куда расти после книги. C++20 concepts, ranges, coroutines, modules — обзорно.
-
-Финал близок.
+Глава 50 — `std::string_view` и параллельные алгоритмы. Первый убирает копирование строк там, где нужно только посмотреть, и приносит с собой новый класс ошибок — висящие ссылки. Второй обещает ускорение алгоритмов одним параметром, а на практике оказывается историей о том, почему не всё, что есть в стандарте, доступно на вашей машине.
