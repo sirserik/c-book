@@ -49,10 +49,13 @@ bool parse_args(int argc, char* argv[], Options& opts) {
     return true;
 }
 
-int grep_stream(std::istream& in, const std::regex& re,
-                const Options& opts, const std::string& filename) {
+// Возвращает количество напечатанных строк — вызывающая сторона по нему
+// решает, каким будет код возврата (grep возвращает 1, если не нашёл ничего).
+long long grep_stream(std::istream& in, const std::regex& re,
+                      const Options& opts, const std::string& filename) {
     std::string line;
     long long line_no = 0;
+    long long printed = 0;
     bool multi_file = opts.files.size() > 1;
     while (std::getline(in, line)) {
         ++line_no;
@@ -62,8 +65,9 @@ int grep_stream(std::istream& in, const std::regex& re,
         if (multi_file && !filename.empty()) std::cout << filename << ":";
         if (opts.show_line_numbers)          std::cout << line_no << ":";
         std::cout << line << "\n";
+        ++printed;
     }
-    return 0;
+    return printed;
 }
 
 }  // namespace
@@ -83,23 +87,28 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
+    // Код возврата как у настоящего grep: 0 — нашли, 1 — не нашли, 2 — ошибка.
+    long long found = 0;
+
     if (opts.files.empty()) {
-        return grep_stream(std::cin, re, opts, "");
+        found = grep_stream(std::cin, re, opts, "");
+        return found > 0 ? 0 : 1;
     }
 
-    int rc = 0;
+    bool had_error = false;
     for (const auto& f : opts.files) {
         if (f == "-") {
-            grep_stream(std::cin, re, opts, "<stdin>");
+            found += grep_stream(std::cin, re, opts, "<stdin>");
             continue;
         }
         std::ifstream in(f);
         if (!in.is_open()) {
             std::cerr << "mygrep: " << f << ": " << std::strerror(errno) << "\n";
-            rc = 2;
+            had_error = true;
             continue;
         }
-        grep_stream(in, re, opts, f);
+        found += grep_stream(in, re, opts, f);
     }
-    return rc;
+    if (had_error) return 2;
+    return found > 0 ? 0 : 1;
 }

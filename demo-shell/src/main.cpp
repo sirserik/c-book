@@ -22,7 +22,7 @@ int main() {
     shell::history_load(history_path());
 
     std::cout << "=== myshell ===\n";
-    std::cout << "Builtins: cd, pwd, export, unset, history, echo, exit.\n";
+    std::cout << "Builtins: cd, pwd, export, unset, history, echo, type, alias, exit.\n";
     std::cout << "Кавычки, пайпы, редиректы (>, >>, <, 2>, 2>&1).\n\n";
 
     while (true) {
@@ -36,9 +36,12 @@ int main() {
         }
         if (line.empty()) continue;
 
+        // Алиас раскрываем до разбора: `ll -a` → `ls -l -a`.
+        std::string expanded = shell::expand_alias(line);
+
         shell::Pipeline p;
         try {
-            p = shell::parse_pipeline(line);
+            p = shell::parse_pipeline(expanded);
         } catch (const std::exception& e) {
             std::cerr << "syntax: " << e.what() << "\n";
             continue;
