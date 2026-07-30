@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <exception>
 #include <fstream>
+#include <memory>
 #include <iostream>
 #include <string>
 #include <sys/stat.h>
@@ -78,7 +79,7 @@ void show_help() {
               << "  INSERT INTO <name> VALUES (<n>, <n>);\n"
               << "  SELECT <cols>|* FROM <name> [WHERE <col> <op> <n>];\n"
               << "  EXPLAIN SELECT ...;\n"
-              << "\nКоманды многострочные, заверщаются `;`.\n";
+              << "\nКоманды многострочные, завершаются `;`.\n";
 }
 
 void show_history() {
@@ -114,7 +115,17 @@ int main(int argc, char* argv[]) {
               << "Open: " << dir << "\n"
               << ".help для справки, .quit для выхода.\n\n";
 
-    db::Database db(dir);
+    // Открытие может не удаться: чужой файл, устаревшая версия формата,
+    // нет прав. Ронять программу необработанным исключением здесь некрасиво.
+    std::unique_ptr<db::Database> db_ptr;
+    try {
+        db_ptr.reset(new db::Database(dir));
+    } catch (const std::exception& e) {
+        std::cerr << "Не удалось открыть базу в " << dir << ": " << e.what() << "\n";
+        return 1;
+    }
+    db::Database& db = *db_ptr;
+
     history_load();
 
     std::string buffer;

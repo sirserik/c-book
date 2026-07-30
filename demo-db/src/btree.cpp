@@ -4,12 +4,20 @@
 #include <algorithm>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 
 namespace db {
 
 namespace {
 
 constexpr std::size_t HEADER_BYTES = 16;
+
+// Метка формата в странице 0: "MDB" + версия. Проверяется при открытии, чтобы
+// не пытаться читать как дерево чужой или устаревший файл.
+constexpr unsigned char MAGIC_0 = 'M';
+constexpr unsigned char MAGIC_1 = 'D';
+constexpr unsigned char MAGIC_2 = 'B';
+constexpr unsigned char FORMAT_VERSION = 1;
 
 void write_u16_at(Page& p, std::size_t off, std::uint16_t v) {
     p[off]     = static_cast<unsigned char>(v & 0xFF);
@@ -65,12 +73,24 @@ BPlusTree::BPlusTree(PageManager& pm) : pm_(pm), root_page_id_(0) {
 
 void BPlusTree::load_metadata() {
     Page meta = pm_.read_page(0);
+    if (meta[4] != MAGIC_0 || meta[5] != MAGIC_1 || meta[6] != MAGIC_2) {
+        throw PageError("это не файл mydb (нет метки MDB в странице 0)");
+    }
+    if (meta[7] != FORMAT_VERSION) {
+        throw PageError("версия формата " + std::to_string(static_cast<int>(meta[7])) +
+                        " не поддерживается (нужна " +
+                        std::to_string(static_cast<int>(FORMAT_VERSION)) + ")");
+    }
     root_page_id_ = read_u32_at(meta, 0);
 }
 
 void BPlusTree::save_metadata() {
     Page meta = make_page();
     write_u32_at(meta, 0, root_page_id_);
+    meta[4] = MAGIC_0;
+    meta[5] = MAGIC_1;
+    meta[6] = MAGIC_2;
+    meta[7] = FORMAT_VERSION;
     pm_.write_page(0, meta);
 }
 
@@ -128,15 +148,20 @@ void BPlusTree::write_node(PageId pid, const NodeData& n) {
     pm_.write_page(pid, p);
 }
 
-PageId BPlusTree::find_leaf(std::int64_t key, std::vector<PageId>* path) const {
+PageId BPlusTree::find_leaf(std::int64_t key, std::vector<PageId>* path,
+                            bool lower) const {
     PageId pid = root_page_id_;
     while (true) {
         NodeData n = read_node(pid);
         if (n.type == Leaf) return pid;
         if (path) path->push_back(pid);
 
-        // Найти такого ребёнка, чтобы keys[i-1] <= key < keys[i].
-        auto it = std::upper_bound(n.keys.begin(), n.keys.end(), key);
+        // upper_bound: keys[i-1] <= key < keys[i] — обычный спуск.
+        // lower_bound: уходим в самое левое поддерево, где ключ ещё возможен;
+        // при дубликатах, разъехавшихся через разделитель, это единственный
+        // способ не пропустить левую половину.
+        auto it = lower ? std::lower_bound(n.keys.begin(), n.keys.end(), key)
+                        : std::upper_bound(n.keys.begin(), n.keys.end(), key);
         std::size_t idx = static_cast<std::size_t>(it - n.keys.begin());
         pid = n.children[idx];
     }
@@ -259,6 +284,42 @@ void BPlusTree::insert(std::int64_t key, std::int64_t value) {
     std::int64_t sep = 0;
     PageId right = split_leaf(leaf_pid, leaf, sep);
     insert_in_parent(path, sep, right);
+}
+
+void BPlusTree::insert_dup(std::int64_t key, std::int64_t value) {
+    std::vector<PageId> path;
+    PageId leaf_pid = find_leaf(key, &path);
+    NodeData leaf = read_node(leaf_pid);
+
+    // upper_bound — новая запись встаёт ПОСЛЕ уже имеющихся с тем же ключом.
+    auto it = std::upper_bound(leaf.keys.begin(), leaf.keys.end(), key);
+    std::size_t idx = static_cast<std::size_t>(it - leaf.keys.begin());
+
+    leaf.keys.insert(leaf.keys.begin() + idx, key);
+    leaf.values.insert(leaf.values.begin() + idx, value);
+
+    if (leaf.keys.size() <= MAX_KEYS) {
+        write_node(leaf_pid, leaf);
+        return;
+    }
+
+    std::int64_t sep = 0;
+    PageId right = split_leaf(leaf_pid, leaf, sep);
+    insert_in_parent(path, sep, right);
+}
+
+void BPlusTree::find_all(std::int64_t key,
+                         std::function<void(std::int64_t)> cb) const {
+    PageId pid = find_leaf(key, nullptr, /*lower=*/true);
+    while (pid != 0) {
+        NodeData leaf = read_node(pid);
+        for (std::size_t i = 0; i < leaf.keys.size(); ++i) {
+            if (leaf.keys[i] < key) continue;
+            if (leaf.keys[i] > key) return;   // отсортировано — дальше только больше
+            cb(leaf.values[i]);
+        }
+        pid = leaf.next_leaf;
+    }
 }
 
 void BPlusTree::scan(std::function<void(std::int64_t, std::int64_t)> cb) const {

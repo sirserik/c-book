@@ -56,6 +56,7 @@ void PageManager::flush_entry(PageId pid, Entry& e) {
             if (errno == EINTR) continue;
             throw PageError(std::string("pwrite: ") + std::strerror(errno));
         }
+        ++stats_.disk_writes;
         written += n;
     }
     e.dirty = false;
@@ -67,6 +68,7 @@ void PageManager::evict_one_if_full() {
     PageId victim = lru_.back();
     auto it = cache_.find(victim);
     flush_entry(victim, it->second.first);
+    ++stats_.evictions;
     lru_.pop_back();
     cache_.erase(it);
 }
@@ -74,9 +76,11 @@ void PageManager::evict_one_if_full() {
 PageManager::Entry& PageManager::load_into_cache(PageId pid) {
     auto it = cache_.find(pid);
     if (it != cache_.end()) {
+        ++stats_.hits;
         touch(pid);
         return it->second.first;
     }
+    ++stats_.misses;
 
     evict_one_if_full();
 
@@ -99,6 +103,7 @@ PageManager::Entry& PageManager::load_into_cache(PageId pid) {
             // Дочитали до конца файла — остальное оставляем нулями.
             break;
         }
+        ++stats_.disk_reads;
         read_total += n;
     }
 

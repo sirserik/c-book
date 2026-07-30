@@ -38,6 +38,16 @@ public:
     // Вставка. Если ключ уже есть — обновляет значение.
     void insert(std::int64_t key, std::int64_t value);
 
+    // Вставка с разрешёнными дубликатами: одинаковые ключи не затирают друг
+    // друга, а ложатся рядом. Нужна вторичным индексам, где на одно значение
+    // приходится много строк.
+    void insert_dup(std::int64_t key, std::int64_t value);
+
+    // Все значения для ключа, в порядке вставки слева направо. Работает и
+    // тогда, когда дубликаты разъехались по соседним листьям.
+    void find_all(std::int64_t key,
+                  std::function<void(std::int64_t)> cb) const;
+
     // Обход всех пар в отсортированном порядке через leaf-цепочку.
     void scan(std::function<void(std::int64_t, std::int64_t)> cb) const;
 
@@ -62,7 +72,10 @@ private:
     void save_metadata();
 
     // Спуск до листа. Записывает в path id всех внутренних узлов на пути.
-    PageId find_leaf(std::int64_t key, std::vector<PageId>* path) const;
+    // lower=true спускается к САМОМУ ЛЕВОМУ листу, который может содержать
+    // ключ, — это важно, когда дубликаты лежат по обе стороны разделителя.
+    PageId find_leaf(std::int64_t key, std::vector<PageId>* path,
+                     bool lower = false) const;
 
     // Разделить узел: вернуть id нового правого узла и ключ-разделитель.
     PageId split_leaf(PageId leaf_pid, NodeData& leaf, std::int64_t& sep_key);

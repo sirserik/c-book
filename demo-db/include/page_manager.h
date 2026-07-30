@@ -55,6 +55,18 @@ public:
     // Записать все dirty-страницы на диск и fsync.
     void sync();
 
+    // Счётчики для наблюдения за кэшем: сколько раз страница нашлась в памяти,
+    // сколько раз пришлось идти на диск, сколько страниц вытеснено.
+    struct Stats {
+        long long hits = 0;        // страница была в кэше
+        long long misses = 0;      // пришлось читать с диска
+        long long evictions = 0;   // вытеснено из кэша
+        long long disk_reads = 0;  // вызовов pread
+        long long disk_writes = 0; // вызовов pwrite
+    };
+    const Stats& stats() const { return stats_; }
+    void reset_stats() { stats_ = Stats(); }
+
 private:
     struct Entry {
         Page page;
@@ -67,6 +79,8 @@ private:
     int fd_;
     PageId page_count_;
     std::size_t cache_size_;
+
+    Stats stats_;
 
     LruList lru_;   // front = самая свежая
     std::unordered_map<PageId, std::pair<Entry, LruIter>> cache_;

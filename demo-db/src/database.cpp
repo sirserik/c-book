@@ -82,14 +82,14 @@ void Database::execute_create_index(const Statement& st, std::ostream& out) {
     idx.tree  = mk<BPlusTree>(*idx.pm);
     idx.wal   = mk<WAL>(dir_ + "/idx_" + st.index_name + ".wal");
     idx.wal->replay([&idx](std::int64_t k, std::int64_t v) {
-        idx.tree->insert(k, v);
+        idx.tree->insert_dup(k, v);
     });
 
     int populated = 0;
     tree_->scan([&](std::int64_t row_id, std::int64_t row_value) {
         std::int64_t key = (col == col_names_[0]) ? row_id : row_value;
         idx.wal->log_insert(key, row_id);
-        idx.tree->insert(key, row_id);
+        idx.tree->insert_dup(key, row_id);
         ++populated;
     });
     idx.pm->sync();
@@ -114,7 +114,7 @@ void Database::execute_insert(const Statement& st, std::ostream& out) {
         const std::string& col = kv.first;
         std::int64_t key = (col == col_names_[0]) ? id : value;
         kv.second.wal->log_insert(key, id);
-        kv.second.tree->insert(key, id);
+        kv.second.tree->insert_dup(key, id);
     }
 
     out << "1 row\n";
@@ -199,8 +199,9 @@ void Database::run_secondary(const Statement& st, const std::vector<std::string>
     };
 
     if (st.where_op == "=") {
-        std::int64_t row_id = 0;
-        if (idx.tree->find(st.where_val, row_id)) emit(row_id);
+        // Вторичный ключ не уникален: на одно значение может приходиться
+        // много строк, поэтому берём ВСЕ совпадения, а не первое.
+        idx.tree->find_all(st.where_val, emit);
     } else {
         idx.tree->scan([&](std::int64_t key, std::int64_t row_id) {
             const auto r = st.where_val;
