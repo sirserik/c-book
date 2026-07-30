@@ -70,7 +70,7 @@ void leave_room(std::unordered_map<int, ClientState>& clients,
     rooms[room].erase(fd);
     if (rooms[room].empty()) rooms.erase(room);
     broadcast_room(clients, rooms, room, fd, chat::kNotify,
-                   "* " + ci->second.name + " вышел из " + room);
+                   ci->second.name + " вышел из " + room);
     ci->second.room.clear();
 }
 
@@ -98,7 +98,7 @@ void process_message(std::unordered_map<int, ClientState>& clients,
             rooms[c.room].insert(fd);
             enqueue_frame(c, chat::kNotify, "вы в комнате " + c.room);
             broadcast_room(clients, rooms, c.room, fd, chat::kNotify,
-                           "* " + c.name + " вошёл в " + c.room);
+                           c.name + " вошёл в " + c.room);
             break;
         }
         case chat::kLeave: {

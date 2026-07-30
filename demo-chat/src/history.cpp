@@ -81,9 +81,15 @@ std::vector<HistoryRecord> History::recent(const std::string& room, std::size_t 
     int rfd = ::open(path_.c_str(), O_RDONLY);
     if (rfd < 0) return all;
 
+    // Верхний предел на запись. Без него испорченный файл с мусором в поле
+    // длины заставил бы нас выделить гигабайты — та же защита, что в разборе
+    // сетевого протокола (глава 44).
+    const std::uint32_t kMaxRecord = 1u << 20;   // 1 MiB
+
     std::uint8_t hdr[4];
     while (read_all(rfd, hdr, 4)) {
         std::uint32_t body_len = r_u32(hdr);
+        if (body_len < 10 || body_len > kMaxRecord) break;   // битая запись — дальше не идём
         std::vector<std::uint8_t> body(body_len);
         if (!read_all(rfd, body.data(), body_len)) break;
 
@@ -92,6 +98,7 @@ std::vector<HistoryRecord> History::recent(const std::string& room, std::size_t 
         std::uint16_t nl = r_u16(body.data() + 4);
         std::uint16_t rl = r_u16(body.data() + 6);
         std::uint16_t tl = r_u16(body.data() + 8);
+        if (10u + nl + rl + tl > body_len) break;             // длины не сходятся
         std::size_t pos = 10;
         rec.name.assign(reinterpret_cast<const char*>(body.data() + pos), nl); pos += nl;
         rec.room.assign(reinterpret_cast<const char*>(body.data() + pos), rl); pos += rl;
