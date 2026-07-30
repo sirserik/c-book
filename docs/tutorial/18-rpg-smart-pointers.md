@@ -13,7 +13,7 @@
 ```cpp
 std::vector<Item*> items;
 items.push_back(new Weapon("меч", 5, 10));
-// ...
+items.push_back(new Armor("щит", 8, 4));
 
 for (Item* it : items) {
     delete it;
@@ -33,9 +33,7 @@ items.clear();
 
 Их три:
 
-- **`std::unique_ptr<T>`** — единоличный владелец. Только один указатель на объект.
-- **`std::shared_ptr<T>`** — совладельцы. Объект живёт, пока есть хотя бы один указатель.
-- **`std::weak_ptr<T>`** — наблюдатель. Сам не владеет, но может проверить, жив ли объект.
+`std::unique_ptr<T>` — единоличный владелец: на объект указывает ровно один такой указатель, копировать его нельзя, только передавать перемещением. `std::shared_ptr<T>` — совладение: объект живёт, пока существует хотя бы один указатель на него, а счётчик ссылок ведётся автоматически. `std::weak_ptr<T>` — наблюдатель, который сам не владеет, но умеет проверить, жив ли ещё объект, и при необходимости получить на него полноценную ссылку.
 
 Все три — в заголовке `<memory>`.
 
@@ -107,7 +105,7 @@ void use_item(std::unique_ptr<Item> item) {
 
 int main() {
     std::unique_ptr<Item> sword = make_sword();
-    // ...
+    std::cout << sword->name() << "\n";     // пока владеем — можно пользоваться
     use_item(std::move(sword));
     // sword теперь пустой
 }
@@ -414,11 +412,25 @@ const Item* Inventory::find(const std::string& name) const {
 ```cpp
 class Location {
 public:
-    // ...
+    Location(std::string id, std::string name, std::string description);
+
+    const std::string& id() const;
+    const std::string& name() const;
+    const std::string& description() const;
+
+    void add_exit(const std::string& direction, const std::string& target_id);
+    std::string exit(const std::string& direction) const;
+    const std::unordered_map<std::string, std::string>& exits() const;
+
+    // Предметы лежат в инвентаре локации. Тот же класс, разный смысл.
     Inventory& items();
     const Inventory& items() const;
+
 private:
-    // ...
+    std::string id_;
+    std::string name_;
+    std::string description_;
+    std::unordered_map<std::string, std::string> exits_;
     Inventory items_;
 };
 ```
@@ -428,11 +440,27 @@ private:
 ```cpp
 class Player {
 public:
-    // ...
+    Player(std::string name, int max_hp);
+
+    const std::string& name() const;
+    int hp() const;
+    int max_hp() const;
+    bool alive() const;
+
+    void take_damage(int amount);
+    void heal(int amount);
+
+    // Прямая установка hp (для load). Зажимается в [0, max_hp].
+    void set_hp(int hp);
+
+    // Доступ к инвентарю в двух вариантах: const и нет.
     Inventory& inventory();
     const Inventory& inventory() const;
+
 private:
-    // ...
+    std::string name_;
+    int hp_;
+    int max_hp_;
     Inventory inventory_;
 };
 ```
@@ -485,10 +513,16 @@ void Game::cmd_drop(const std::string& item_name) {
         return;
     }
     Location* loc = world_.find(current_location_id_);
-    // ...
+    if (!loc) {
+        std::cout << "Вы выбросили " << dropped->name() << " в пустоту.\n";
+        return;
+    }
+    std::cout << "Вы бросили: " << dropped->name() << "\n";
     loc->items().add(std::move(dropped));
 }
 ```
+
+Проверка `if (!loc)` здесь не паранойя, а следствие того, что `World::find` возвращает обычный указатель и вправе вернуть пустой. Случиться такое может только при рассогласовании данных — например, если сохранение помнит локацию, которой больше нет в файле мира, — но обработать этот случай дешевле, чем разбираться потом с падением.
 
 `cmd_use` — пример полиморфизма через `dynamic_cast`:
 
@@ -529,10 +563,7 @@ $ make && echo -e "look\ntake ржавый меч\ninventory\nquit" | ./build/rp
 ```
 
 Игра умеет:
-- Брать предметы с земли (`take`).
-- Носить их в инвентаре (`inventory`).
-- Бросать обратно (`drop`).
-- Использовать расходники (`use`).
+Игрок должен уметь подобрать предмет с земли, носить его в инвентаре, бросить обратно и применить расходник. Каждое из этих действий — передача владения, и именно поэтому здесь так уместен `unique_ptr`: он не даёт случайно оставить предмет в двух местах сразу.
 
 И всё это **без единого ручного `delete`**. Каждый предмет с момента создания через `make_unique` и до конца программы безопасно владеется одним `unique_ptr`. Передачи владения через `std::move` явны.
 
