@@ -286,6 +286,17 @@ void BPlusTree::insert(std::int64_t key, std::int64_t value) {
     insert_in_parent(path, sep, right);
 }
 
+int BPlusTree::height() const {
+    int h = 1;
+    PageId pid = root_page_id_;
+    while (true) {
+        NodeData n = read_node(pid);
+        if (n.type == Leaf) return h;
+        ++h;
+        pid = n.children.front();
+    }
+}
+
 void BPlusTree::insert_dup(std::int64_t key, std::int64_t value) {
     std::vector<PageId> path;
     PageId leaf_pid = find_leaf(key, &path);

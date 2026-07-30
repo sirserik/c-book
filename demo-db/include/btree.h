@@ -54,6 +54,9 @@ public:
     // Для тестов/отладки: id корневой страницы.
     PageId root_page() const { return root_page_id_; }
 
+    // Высота дерева: 1 — только корень-лист, 2 — корень плюс листья, и так далее.
+    int height() const;
+
 private:
     enum NodeType : std::uint16_t { Internal = 0, Leaf = 1 };
 
