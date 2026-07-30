@@ -356,7 +356,7 @@ void test_database() {
 
         std::ostringstream sel;
         d.execute("SELECT * FROM items WHERE value = 100", sel);
-        check(sel.str().find("(2 rows)") != std::string::npos,
+        check(sel.str().find("(2 строки)") != std::string::npos,
               "вторичный индекс возвращает обе строки с одинаковым значением");
 
         std::ostringstream plan;
@@ -377,7 +377,7 @@ void test_database() {
         db::Database d(dir);
         std::ostringstream sel;
         d.execute("SELECT * FROM items WHERE id = 3", sel);
-        check(sel.str().find("(1 row)") != std::string::npos,
+        check(sel.str().find("(1 строка)") != std::string::npos,
               "строка нашлась после переоткрытия базы");
     }
 
