@@ -158,20 +158,26 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // Можно писать
+            // Можно писать. Осторожно: если отправка сорвалась, клиента надо
+            // удалить — и после этого ссылка s указывает в никуда, поэтому
+            // выходим сразу, а не продолжаем работать с ней.
             if ((re & POLLOUT) && !s.send_buf.empty()) {
+                bool dropped = false;
                 while (!s.send_buf.empty()) {
                     ssize_t w = ::send(fd, s.send_buf.data(), s.send_buf.size(), MSG_NOSIGNAL);
                     if (w < 0) {
                         if (errno == EAGAIN || errno == EWOULDBLOCK) break;
                         if (errno == EINTR) continue;
-                        // ошибка — закроем
+                        std::cout << "[server] " << s.name << ": send: "
+                                  << std::strerror(errno) << "\n";
                         ::close(fd);
                         clients.erase(it);
+                        dropped = true;
                         break;
                     }
                     s.send_buf.erase(0, static_cast<std::size_t>(w));
                 }
+                if (dropped) continue;
             }
 
             // Хост-отключение/ошибка

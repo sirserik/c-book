@@ -21,9 +21,18 @@ DEPS     := $(OBJS:.o=.d)
 UTIL_SRCS := $(wildcard utils/*.cpp)
 UTILS     := $(patsubst utils/%.cpp, build/%, $(UTIL_SRCS))
 
+TEST_SRCS := $(wildcard tests/*.cpp)
+TESTS     := $(patsubst tests/%.cpp, build/tests/%, $(TEST_SRCS))
+
 all: utils
 
 utils: $(UTILS)
+
+tests: $(TESTS)
+
+build/tests/%: tests/%.cpp $(OBJS)
+	@mkdir -p build/tests
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 build/%: utils/%.cpp $(OBJS)
 	@mkdir -p build
@@ -38,4 +47,4 @@ clean:
 
 -include $(DEPS)
 
-.PHONY: all utils clean
+.PHONY: all utils tests clean
