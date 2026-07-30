@@ -25,6 +25,9 @@ namespace {
 
 std::vector<std::string> g_history;
 
+// Сколько команд помним. Без ограничения файл истории растёт вечно.
+const std::size_t kHistoryLimit = 1000;
+
 std::string history_path() {
     const char* home = std::getenv("HOME");
     if (!home) return "./.mydb_history";
@@ -38,6 +41,11 @@ void history_load() {
     while (std::getline(in, line)) {
         if (!line.empty()) g_history.push_back(line);
     }
+    if (g_history.size() > kHistoryLimit) {
+        g_history.erase(g_history.begin(),
+                        g_history.begin() +
+                            static_cast<long>(g_history.size() - kHistoryLimit));
+    }
 }
 
 void history_save() {
@@ -50,6 +58,11 @@ void history_add(const std::string& q) {
     if (q.empty()) return;
     if (!g_history.empty() && g_history.back() == q) return;
     g_history.push_back(q);
+    if (g_history.size() > kHistoryLimit) {
+        g_history.erase(g_history.begin(),
+                        g_history.begin() +
+                            static_cast<long>(g_history.size() - kHistoryLimit));
+    }
 }
 
 // Срезать пробелы по краям.
@@ -160,25 +173,24 @@ int main(int argc, char* argv[]) {
         buffer += t;
         first_line = false;
 
-        // Проверяем, есть ли в накопленном `;`. Простейший вариант — ищем
-        // последнюю точку с запятой. (Не учитываем строки с `;` внутри.)
-        auto semi = buffer.find(';');
-        if (semi == std::string::npos) {
-            continue;   // ещё ждём
+        // В строке может быть несколько команд: `INSERT ...; SELECT ...;`.
+        // Выполняем ВСЕ завершённые, а незавершённый хвост оставляем в буфере
+        // до следующей строки.
+        while (true) {
+            std::size_t semi = buffer.find(';');
+            if (semi == std::string::npos) break;
+
+            std::string stmt = buffer.substr(0, semi + 1);
+            buffer = trim(buffer.substr(semi + 1));
+
+            try {
+                db.execute(stmt, std::cout);
+            } catch (const std::exception& e) {
+                std::cout << "Error: " << e.what() << "\n";
+            }
+            history_add(trim(stmt));
         }
 
-        // Извлекаем statement до `;`, остаток — обратно в буфер.
-        std::string stmt = buffer.substr(0, semi + 1);
-        std::string rest = buffer.substr(semi + 1);
-
-        try {
-            db.execute(stmt, std::cout);
-        } catch (const std::exception& e) {
-            std::cout << "Error: " << e.what() << "\n";
-        }
-        history_add(trim(stmt));
-
-        buffer = trim(rest);
         first_line = buffer.empty();
     }
 
