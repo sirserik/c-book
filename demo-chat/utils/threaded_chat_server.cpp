@@ -4,6 +4,7 @@
 // клиента рассылаются всем остальным. Список клиентов защищён std::mutex.
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
@@ -29,7 +30,11 @@ struct Client {
 
 std::mutex g_mutex;
 std::vector<Client> g_clients;
-int g_next_id = 1;
+
+// Счётчик имён. Его увеличивают потоки-обработчики, значит, обычный int
+// здесь — гонка данных: два клиента, подключившиеся одновременно, могли бы
+// получить одно имя. atomic делает инкремент неделимым (глава 42).
+std::atomic<int> g_next_id(1);
 
 void broadcast(int from_fd, const std::string& msg) {
     std::lock_guard<std::mutex> lock(g_mutex);
@@ -54,7 +59,7 @@ void unregister_client(int fd) {
 }
 
 void handle_client(int fd) {
-    std::string name = "user_" + std::to_string(g_next_id++);
+    std::string name = "user_" + std::to_string(g_next_id.fetch_add(1));
     register_client(fd, name);
     std::cout << "[server] " << name << " присоединился\n";
 
